@@ -38,8 +38,14 @@ LIBS += -lole32
 
 INCLUDEPATH += ../QuickViewer/src/qlanguageselector
 
+# The entry point of this tool used to be main.cpp. It is called associatefiles.cpp
+# so that its base name is unique: nmake looks up the recipe of every object through
+# batch inference rules which are searched per source directory, and the QuickViewer
+# project compiles fileassocdialog.cpp from this directory. With a main.cpp in here
+# nmake used this file for the release\main.obj of QuickViewer as well, and the
+# application was linked with the wrong main().
 SOURCES += \
-        main.cpp \
+        associatefiles.cpp \
         fileassocdialog.cpp \
     ../QuickViewer/src/qlanguageselector/qlanguageselector.cpp \
     ../QuickViewer/src/qlanguageselector/qtexttranslator.cpp

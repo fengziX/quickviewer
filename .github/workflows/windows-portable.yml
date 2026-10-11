@@ -92,6 +92,9 @@ jobs:
             $i++
             if ($_ -match 'main\.cpp') { Write-Host ("L{0}: {1}" -f $i, $_.Substring(0, [Math]::Min(200, $_.Length))) }
           }
+          Write-Host '--- nmake batch inference rules of the QuickViewer project ---'
+          Select-String -Path 'build/QuickViewer/Makefile.Release' -Pattern '^\{.*\}\.cpp\{.*\}\.obj' |
+            Select-Object -First 14 | ForEach-Object { Write-Host ("L{0}: {1}" -f $_.LineNumber, $_.Line.Substring(0, [Math]::Min(130, $_.Line.Length))) }
           Write-Host '--- contents of the built main.obj ---'
           foreach ($p in @('build/QuickViewer/release/main.obj', 'build/AssociateFilesWithQuickViewer/release/main.obj')) {
             Write-Host ("   {0}: QT_QPA_PLATFORM={1} quickviewer_={2}" -f $p, (Get-Hits $p 'QT_QPA_PLATFORM'), (Get-Hits $p 'quickviewer_'))
