@@ -133,10 +133,10 @@ jobs:
           $zip = "$env:DIST_NAME.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           if (Get-Command 7z -ErrorAction SilentlyContinue) {
-            7z a -tzip -mx=5 $zip ".\$env:DIST_NAME\*"
+            7z a -tzip -mx=5 $zip ".\$env:DIST_NAME"
             if ($LASTEXITCODE -ne 0) { throw '7z failed' }
           } else {
-            Compress-Archive -Path ".\$env:DIST_NAME\*" -DestinationPath $zip
+            Compress-Archive -Path ".\$env:DIST_NAME" -DestinationPath $zip
           }
           Get-Item $zip | Select-Object Name, Length
 
