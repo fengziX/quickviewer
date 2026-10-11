@@ -4,6 +4,7 @@
 #include "qvapplication.h"
 #include "thumbnailmanager.h"
 #include "qnamedpipe.h"
+#include "fullscreenclosebutton.h"
 
 #if defined(Q_OS_WIN)
   #include "mainwindowforwindows.h"
@@ -58,6 +59,9 @@ int main(int argc, char *argv[])
 #else
         MainWindow w;
 #endif
+        // Add the close button to the right side of the fullscreen button
+        // which is placed in the top right corner of the menu bar.
+        installFullscreenCloseButton(&w);
         QString dbpath = app.CatalogDatabasePath();
         ThumbnailManager manager(&w, dbpath);
         w.setThumbnailManager(&manager);

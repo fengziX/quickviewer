@@ -1,0 +1,130 @@
+name: Windows portable build
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: '6.9.3'
+  QT_ARCH: 'win64_msvc2022_64'
+  DIST_NAME: 'QuickViewer-portable-1.2.8-x64'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout source with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Qt
+        run: |
+          python -m pip install --upgrade pip aqtinstall
+          python -m aqt install-qt windows desktop $env:QT_VERSION $env:QT_ARCH -O C:/Qt
+          if ($LASTEXITCODE -ne 0) { throw 'Qt base installation failed' }
+          python -m aqt install-qt windows desktop $env:QT_VERSION $env:QT_ARCH -m qtsvg -O C:/Qt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host '::notice::qtsvg is not published as a separate package for this Qt version, assuming it is bundled with the base package.'
+          }
+
+      - name: Configure Qt environment
+        run: |
+          $qtDir = "C:/Qt/$env:QT_VERSION/msvc2022_64"
+          "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$qtDir/bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Qt directory: $qtDir"
+          Get-ChildItem "$qtDir/lib" -Filter 'Qt6Svg*' | Select-Object -ExpandProperty Name
+          if (-not (Test-Path "$qtDir/lib/Qt6SvgWidgets.lib")) {
+            Write-Host '::error::Qt6SvgWidgets.lib was not found - the QtSvgWidgets module is required by QuickViewer.'
+          }
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Run qmake
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          Push-Location build
+          qmake -o Makefile -recursive ../QVproject.pro
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { throw "qmake failed with exit code $code" }
+
+      - name: Build with nmake
+        run: |
+          Push-Location build
+          nmake
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { throw "nmake failed with exit code $code" }
+
+      - name: Show build output
+        run: |
+          Get-ChildItem build/bin | Select-Object Name, Length
+          Get-ChildItem build/lib -Filter '*.dll' | Select-Object Name, Length
+
+      - name: Assemble portable package
+        run: |
+          $dist = $env:DIST_NAME
+          New-Item -ItemType Directory -Force -Path $dist, "$dist/translations", "$dist/database" | Out-Null
+
+          Copy-Item build/bin/QuickViewer.exe $dist -Force
+          Copy-Item build/bin/AssociateFilesWithQuickViewer.exe $dist -Force
+          Copy-Item Qt7z/Qt7z/windll/x64/7z.dll $dist -Force
+          Copy-Item build/lib/QSVGNative0.dll $dist -Force
+          Copy-Item README.md, LICENSE $dist -Force
+
+          Copy-Item QuickViewer/translations/languages.ini $dist/translations -Force
+          Copy-Item QuickViewer/translations/*.qm $dist/translations -Force
+          Copy-Item "$env:Qt6_DIR/translations/qt_zh_CN.qm" $dist/translations -Force -ErrorAction SilentlyContinue
+          Copy-Item QuickViewer/database/schema.sql, QuickViewer/database/thumbnail.sqlite3.db $dist/database -Force
+
+          windeployqt --release --compiler-runtime --no-translations "$dist/QuickViewer.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+          New-Item -ItemType Directory -Force -Path "$dist/platforms" | Out-Null
+          Copy-Item "$env:Qt6_DIR/plugins/platforms/qdirect2d.dll" "$dist/platforms" -Force -ErrorAction SilentlyContinue
+
+          Get-ChildItem $dist -Recurse -File | Measure-Object -Property Length -Sum |
+            ForEach-Object { Write-Host ("{0} files, {1:N1} MB" -f $_.Count, ($_.Sum / 1MB)) }
+
+      - name: Create zip archive
+        run: |
+          $zip = "$env:DIST_NAME.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z a -tzip -mx=5 $zip ".\.\$env:DIST_NAME\*"
+            if ($LASTEXITCODE -ne 0) { throw '7z failed' }
+          } else {
+            Compress-Archive -Path ".\$env:DIST_NAME\*" -DestinationPath $zip
+          }
+          Get-Item $zip | Select-Object Name, Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DIST_NAME }}
+          path: ${{ env.DIST_NAME }}.zip
+          if-no-files-found: error
+
+      - name: Publish release with portable package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "portable-${{ github.run_number }}" "$env:DIST_NAME.zip" `
+            --title "QuickViewer portable build #${{ github.run_number }} (1.2.8-x64)" `
+            --notes "Automated Windows portable build of QuickViewer 1.2.8 (x64), including the extra close button in the full screen toolbar."
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
