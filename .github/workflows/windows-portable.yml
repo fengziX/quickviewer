@@ -77,27 +77,47 @@ jobs:
           Get-ChildItem build/bin | Select-Object Name, Length
           Get-ChildItem build/lib -Filter '*.dll' | Select-Object Name, Length
 
-      - name: Diagnose linked objects
+      - name: Diagnose and verify the QuickViewer executable
         run: |
-          Write-Host '--- object count per project ---'
-          foreach ($p in @('QuickViewer', 'AssociateFilesWithQuickViewer')) {
-            $objs = @(Get-ChildItem "build/$p/release" -Filter '*.obj' -ErrorAction SilentlyContinue)
-            Write-Host ("{0}: {1} object files" -f $p, $objs.Count)
-            $main = $objs | Where-Object { $_.Name -eq 'main.obj' }
-            if ($main) { Write-Host ("   main.obj: {0} bytes, {1}" -f $main.Length, $main.LastWriteTime) }
-            else { Write-Host '   main.obj: MISSING' }
+          function Get-Hits([string]$path, [string]$needle) {
+            $raw = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetString([System.IO.File]::ReadAllBytes($path))
+            return ([regex]::Matches($raw, [regex]::Escape($needle))).Count
           }
-          Write-Host '--- main.obj rules in Makefile.Release of QuickViewer ---'
-          Select-String -Path 'build/QuickViewer/Makefile.Release' -Pattern 'main\.obj' |
-            Select-Object -First 6 | ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
-          Write-Host '--- main.obj symbol table ---'
-          dumpbin /symbols build/QuickViewer/release/main.obj 2>&1 |
-            Select-String -Pattern 'External' | Select-Object -First 25 |
-            ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
-          Write-Host '--- main.cpp markers in the linked exe ---'
-          dumpbin /imports build/bin/QuickViewer.exe 2>&1 |
-            Select-String -Pattern 'GetPrivateProfile|lstrcmp' | ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
-          Write-Host ('   exe size: ' + (Get-Item build/bin/QuickViewer.exe).Length)
+          $exe = 'build/bin/QuickViewer.exe'
+          $closeLabel = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetString([byte[]](0xE5,0x85,0xB3,0xE9,0x97,0xAD))
+
+          Write-Host '--- main.cpp references in build/QuickViewer/Makefile.Release ---'
+          $i = 0
+          Get-Content 'build/QuickViewer/Makefile.Release' | ForEach-Object {
+            $i++
+            if ($_ -match 'main\.cpp') { Write-Host ("L{0}: {1}" -f $i, $_.Substring(0, [Math]::Min(200, $_.Length))) }
+          }
+          Write-Host '--- contents of the built main.obj ---'
+          foreach ($p in @('build/QuickViewer/release/main.obj', 'build/AssociateFilesWithQuickViewer/release/main.obj')) {
+            Write-Host ("   {0}: QT_QPA_PLATFORM={1} quickviewer_={2}" -f $p, (Get-Hits $p 'QT_QPA_PLATFORM'), (Get-Hits $p 'quickviewer_'))
+          }
+
+          Write-Host '--- checks on the linked exe ---'
+          $okMain = (Get-Hits $exe 'QT_QPA_PLATFORM') -gt 0
+          Write-Host ("   QuickViewer main() present : {0}" -f $okMain)
+          if (-not $okMain) {
+            Write-Host '::warning::main.obj was not built from QuickViewer/src/main.cpp - rebuilding it'
+            Push-Location build/QuickViewer
+            Remove-Item release/main.obj -Force -ErrorAction SilentlyContinue
+            nmake -f Makefile.Release 'release\main.obj'
+            if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'rebuilding main.obj failed' }
+            nmake -f Makefile.Release
+            if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'relinking QuickViewer.exe failed' }
+            Pop-Location
+            $okMain = (Get-Hits $exe 'QT_QPA_PLATFORM') -gt 0
+            Write-Host ("   QuickViewer main() present after rebuild : {0}" -f $okMain)
+          }
+
+          $okFeature = ((Get-Hits $exe 'qvCloseButtonInstalled') -gt 0) -and ((Get-Hits $exe $closeLabel) -gt 0)
+          Write-Host ("   close button patch present : {0}" -f $okFeature)
+
+          if (-not $okMain) { throw 'QuickViewer.exe was linked without QuickViewer main() - refusing to publish a broken package' }
+          if (-not $okFeature) { throw 'The close button patch is missing from QuickViewer.exe' }
 
       - name: Assemble portable package
         run: |
