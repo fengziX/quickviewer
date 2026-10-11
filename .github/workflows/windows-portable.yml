@@ -31,12 +31,10 @@ jobs:
       - name: Install Qt
         run: |
           python -m pip install --upgrade pip aqtinstall
+          # QtSvg / QtSvgWidgets are part of the base package since Qt 6.8,
+          # so no extra module is required for the svgwidgets module of qmake.
           python -m aqt install-qt windows desktop $env:QT_VERSION $env:QT_ARCH -O C:/Qt
           if ($LASTEXITCODE -ne 0) { throw 'Qt base installation failed' }
-          python -m aqt install-qt windows desktop $env:QT_VERSION $env:QT_ARCH -m qtsvg -O C:/Qt
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host '::notice::qtsvg is not published as a separate package for this Qt version, assuming it is bundled with the base package.'
-          }
 
       - name: Configure Qt environment
         run: |
@@ -46,7 +44,10 @@ jobs:
           Write-Host "Qt directory: $qtDir"
           Get-ChildItem "$qtDir/lib" -Filter 'Qt6Svg*' | Select-Object -ExpandProperty Name
           if (-not (Test-Path "$qtDir/lib/Qt6SvgWidgets.lib")) {
-            Write-Host '::error::Qt6SvgWidgets.lib was not found - the QtSvgWidgets module is required by QuickViewer.'
+            throw "Qt6SvgWidgets.lib was not found in $qtDir - the QtSvgWidgets module is required by QuickViewer."
+          }
+          if (-not (Test-Path "$qtDir/bin/qmake.exe")) {
+            throw "qmake.exe was not found in $qtDir/bin"
           }
 
       - name: Set up MSVC environment
@@ -106,7 +107,7 @@ jobs:
           $zip = "$env:DIST_NAME.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           if (Get-Command 7z -ErrorAction SilentlyContinue) {
-            7z a -tzip -mx=5 $zip ".\.\$env:DIST_NAME\*"
+            7z a -tzip -mx=5 $zip ".\$env:DIST_NAME\*"
             if ($LASTEXITCODE -ne 0) { throw '7z failed' }
           } else {
             Compress-Archive -Path ".\$env:DIST_NAME\*" -DestinationPath $zip
