@@ -77,6 +77,28 @@ jobs:
           Get-ChildItem build/bin | Select-Object Name, Length
           Get-ChildItem build/lib -Filter '*.dll' | Select-Object Name, Length
 
+      - name: Diagnose linked objects
+        run: |
+          Write-Host '--- object count per project ---'
+          foreach ($p in @('QuickViewer', 'AssociateFilesWithQuickViewer')) {
+            $objs = @(Get-ChildItem "build/$p/release" -Filter '*.obj' -ErrorAction SilentlyContinue)
+            Write-Host ("{0}: {1} object files" -f $p, $objs.Count)
+            $main = $objs | Where-Object { $_.Name -eq 'main.obj' }
+            if ($main) { Write-Host ("   main.obj: {0} bytes, {1}" -f $main.Length, $main.LastWriteTime) }
+            else { Write-Host '   main.obj: MISSING' }
+          }
+          Write-Host '--- main.obj rules in Makefile.Release of QuickViewer ---'
+          Select-String -Path 'build/QuickViewer/Makefile.Release' -Pattern 'main\.obj' |
+            Select-Object -First 6 | ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
+          Write-Host '--- main.obj symbol table ---'
+          dumpbin /symbols build/QuickViewer/release/main.obj 2>&1 |
+            Select-String -Pattern 'External' | Select-Object -First 25 |
+            ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
+          Write-Host '--- main.cpp markers in the linked exe ---'
+          dumpbin /imports build/bin/QuickViewer.exe 2>&1 |
+            Select-String -Pattern 'GetPrivateProfile|lstrcmp' | ForEach-Object { Write-Host ("   " + $_.Line.Trim()) }
+          Write-Host ('   exe size: ' + (Get-Item build/bin/QuickViewer.exe).Length)
+
       - name: Assemble portable package
         run: |
           $dist = $env:DIST_NAME
