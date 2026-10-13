@@ -85,7 +85,9 @@ jobs:
             return ([regex]::Matches($raw, [regex]::Escape($needle))).Count
           }
           $exe = 'build/bin/QuickViewer.exe'
-          $closeLabel = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetString([byte[]](0xE5,0x85,0xB3,0xE9,0x97,0xAD))
+          $latin1 = [System.Text.Encoding]::GetEncoding('ISO-8859-1')
+          $closeLabel = $latin1.GetString([byte[]](0xE5,0x85,0xB3,0xE9,0x97,0xAD))
+          $minimizeLabel = $latin1.GetString([byte[]](0xE6,0x9C,0x80,0xE5,0xB0,0x8F,0xE5,0x8C,0x96))
 
           Write-Host '--- entry points that were compiled ---'
           foreach ($p in @('build/QuickViewer/release/main.obj',
@@ -95,13 +97,15 @@ jobs:
 
           Write-Host '--- checks on the linked exe ---'
           $okMain = (Get-Hits $exe 'QT_QPA_PLATFORM') -gt 0
-          $okFeature = ((Get-Hits $exe 'qvCloseButtonInstalled') -gt 0) -and ((Get-Hits $exe $closeLabel) -gt 0)
+          $okFeature = ((Get-Hits $exe 'qvCaptionButtonsInstalled') -gt 0) -and
+                       ((Get-Hits $exe $closeLabel) -gt 0) -and
+                       ((Get-Hits $exe $minimizeLabel) -gt 0)
           Write-Host ("   QuickViewer main() present  : {0}" -f $okMain)
-          Write-Host ("   close button patch present  : {0}" -f $okFeature)
+          Write-Host ("   caption buttons patch       : {0}" -f $okFeature)
           Write-Host ("   exe size                    : {0}" -f (Get-Item $exe).Length)
 
           if (-not $okMain) { throw 'QuickViewer.exe was linked without the QuickViewer main() - refusing to publish a broken package' }
-          if (-not $okFeature) { throw 'The close button patch is missing from QuickViewer.exe' }
+          if (-not $okFeature) { throw 'The caption buttons patch is missing from QuickViewer.exe' }
 
       - name: Assemble portable package
         run: |

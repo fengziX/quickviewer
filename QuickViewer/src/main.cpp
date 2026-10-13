@@ -59,9 +59,9 @@ int main(int argc, char *argv[])
 #else
         MainWindow w;
 #endif
-        // Add the close button to the right side of the fullscreen button
-        // which is placed in the top right corner of the menu bar.
-        installFullscreenCloseButton(&w);
+        // Replace the fullscreen button which is placed in the top right corner of
+        // the menu bar by the three caption buttons of Windows 11.
+        installCaptionButtons(&w);
         QString dbpath = app.CatalogDatabasePath();
         ThumbnailManager manager(&w, dbpath);
         w.setThumbnailManager(&manager);
