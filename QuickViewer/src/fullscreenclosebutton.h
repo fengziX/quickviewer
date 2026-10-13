@@ -21,6 +21,10 @@ enum QVCaptionRole {
  * normal state, a light grey background while the mouse cursor is over it and a
  * red one for the close button. The glyph is drawn with a thin line instead of
  * the icon font of the system, so that it looks the same on every system.
+ *
+ * The hover state can be forced from the outside (setForcedHot) so that the
+ * highlight is also shown while the mouse cursor is a few pixels away from the
+ * button, at the very corner of the screen.
  */
 class QVCaptionButton : public QToolButton
 {
@@ -28,10 +32,12 @@ public:
     QVCaptionButton(QVCaptionRole role, QWidget* parent = nullptr)
         : QToolButton(parent)
         , m_role(role)
+        , m_forcedHot(false)
     {
         setToolButtonStyle(Qt::ToolButtonIconOnly);
         setFocusPolicy(Qt::NoFocus);
         setCursor(Qt::ArrowCursor);
+        setMouseTracking(true);
     }
 
     void setRole(QVCaptionRole role)
@@ -42,7 +48,13 @@ public:
         update();
     }
 
-    QVCaptionRole role() const { return m_role; }
+    void setForcedHot(bool hot)
+    {
+        if(m_forcedHot == hot)
+            return;
+        m_forcedHot = hot;
+        update();
+    }
 
 protected:
     bool event(QEvent* event) override
@@ -53,6 +65,7 @@ protected:
         case QEvent::HoverEnter:
         case QEvent::HoverLeave:
         case QEvent::EnabledChange:
+        case QEvent::MouseMove:
             update();
             break;
         default:
@@ -63,7 +76,7 @@ protected:
 
     void paintEvent(QPaintEvent*) override
     {
-        const bool lit = underMouse() || isDown();
+        const bool lit = m_forcedHot || underMouse() || isDown();
 
         QColor background(Qt::transparent);
         if(m_role == QVCaptionClose) {
@@ -133,13 +146,14 @@ private:
     }
 
     QVCaptionRole m_role;
+    bool m_forcedHot;
 };
 
 /**
  * @brief The QVMenuBarSpacer class
  *
  * The corner widget of the menu bar which only reserves the space used by the
- * caption buttons.
+ * buttons in the top right corner, so that the menu items do not run under them.
  */
 class QVMenuBarSpacer : public QWidget
 {
@@ -165,18 +179,19 @@ private:
 /**
  * @brief The QVCaptionButtonHost class
  *
- * Replaces the fullscreen button of QuickViewer (and the extra close button
- * which was drawn by hand before) by the three caption buttons of Windows 11:
- * minimize, maximize/restore and close.
+ * Replaces the fullscreen button of QuickViewer by the three caption buttons of
+ * Windows 11 - minimize, maximize/restore and close - in the top right corner of
+ * the toolbar which is displayed on top of the image when the mouse cursor
+ * reaches the top edge of the window.
  *
- * The buttons are placed by hand as children of the menu bar, so that they
- * occupy the very top right corner of the window without any margin of the
- * style, exactly like the caption buttons of Windows: pushing the mouse against
- * the corner always hits the close button.
+ * The buttons are only shown while the window is displayed in full screen. In a
+ * normal or maximized window the title bar of Windows already provides them, so
+ * the fullscreen button of QuickViewer is kept there instead.
  *
- * Because they belong to the menu bar they show up in the toolbar which is
- * displayed on top of the image when the mouse cursor reaches the top edge of the
- * window - in full screen display as well as in a maximized window.
+ * They are children of the window (not of the menu bar), so that they always
+ * cover the very corner of the screen, whatever the size of the menu bar is.
+ * Their hover state is derived from the position of the cursor which is polled,
+ * so that the highlight does not disappear in the last pixels of the screen.
  */
 class QVCaptionButtonHost : public QObject
 {
@@ -185,33 +200,35 @@ public:
         : QObject(menuBar)
         , m_mainWindow(mainWindow)
         , m_menuBar(menuBar)
+        , m_fullscreenButton(nullptr)
         , m_minimizeButton(nullptr)
         , m_maximizeButton(nullptr)
         , m_closeButton(nullptr)
         , m_spacer(nullptr)
         , m_barHeight(30)
         , m_captionWidth(49)
+        , m_buttonsVisible(false)
         , m_cornerPress(false)
         , m_restoreFullScreen(false)
     {
+        m_timer.setInterval(40);
+        connect(&m_timer, &QTimer::timeout, this, [this]() { updateState(); });
     }
 
     void install()
     {
-        // The buttons of QuickViewer which were placed there are not used any more.
-        if(QWidget* oldCornerWidget = m_menuBar->cornerWidget())
-            oldCornerWidget->hide();
+        m_fullscreenButton = m_menuBar->cornerWidget();
 
         m_barHeight = qMax(30, m_menuBar->fontMetrics().height() + 14);
         m_captionWidth = qBound(40, qRound((m_barHeight + 4) * 1.44), 72);
 
         m_spacer = new QVMenuBarSpacer(m_menuBar);
-        m_spacer->setSpacerSize(m_captionWidth * 3, m_barHeight);
+        m_spacer->setSpacerSize(fullscreenWidth(), m_barHeight);
         m_menuBar->setCornerWidget(m_spacer);
 
-        m_minimizeButton = new QVCaptionButton(QVCaptionMinimize, m_menuBar);
-        m_maximizeButton = new QVCaptionButton(QVCaptionMaximize, m_menuBar);
-        m_closeButton = new QVCaptionButton(QVCaptionClose, m_menuBar);
+        m_minimizeButton = new QVCaptionButton(QVCaptionMinimize, m_mainWindow);
+        m_maximizeButton = new QVCaptionButton(QVCaptionMaximize, m_mainWindow);
+        m_closeButton = new QVCaptionButton(QVCaptionClose, m_mainWindow);
 
         // the labels are embedded as UTF-8 escape sequences because the source of
         // this file is kept ASCII only
@@ -228,12 +245,14 @@ public:
             m_mainWindow->close();
         });
 
+        setButtonsVisible(false);
+
         m_menuBar->installEventFilter(this);
+        m_mainWindow->installEventFilter(this);
         qApp->installEventFilter(this);
 
-        updateRoles();
-        reposition();
-        raiseButtons();
+        updateState();
+        m_timer.start();
     }
 
 protected:
@@ -243,10 +262,11 @@ protected:
             switch(event->type()) {
             case QEvent::Resize:
             case QEvent::Show:
+            case QEvent::Hide:
             case QEvent::LayoutRequest:
+            case QEvent::ParentChange:
             case QEvent::StyleChange:
-                reposition();
-                raiseButtons();
+                updateState();
                 break;
             default:
                 break;
@@ -254,11 +274,13 @@ protected:
             return QObject::eventFilter(watched, event);
         }
 
+        if(watched == m_mainWindow && event->type() == QEvent::Resize)
+            updateState();
+
         switch(event->type()) {
         case QEvent::WindowStateChange:
             if(watched == m_mainWindow) {
-                updateRoles();
-                reposition();
+                updateState();
                 // Keep the full screen display when the window was minimized and is
                 // restored again, like other full screen applications do.
                 if(m_restoreFullScreen && !(m_mainWindow->windowState() & Qt::WindowMinimized)) {
@@ -277,7 +299,7 @@ protected:
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
             const bool armed = m_cornerPress;
             m_cornerPress = false;
-            // Safety net: handle a click in the corner of the window even when the
+            // Safety net: handle a click in the corner of the screen even when the
             // event was delivered to another widget.
             if(armed && mouseEvent->button() == Qt::LeftButton && inCloseArea(mouseEvent->globalPosition().toPoint()))
                 m_mainWindow->close();
@@ -290,6 +312,11 @@ protected:
     }
 
 private:
+    int fullscreenWidth() const
+    {
+        return m_fullscreenButton ? qMax(24, m_fullscreenButton->sizeHint().width()) : 28;
+    }
+
     void onMinimize()
     {
         m_restoreFullScreen = m_mainWindow->isFullScreen();
@@ -303,27 +330,63 @@ private:
         // application is used so that the window state is restored correctly.
         if(QAction* actionFullscreen = m_mainWindow->findChild<QAction*>(QStringLiteral("actionFullscreen")))
             actionFullscreen->trigger();
-        updateRoles();
+        updateState();
     }
 
-    void updateRoles()
+    void setButtonsVisible(bool visible)
     {
-        if(!m_maximizeButton)
-            return;
-        const bool fullscreen = m_mainWindow->isFullScreen();
-        m_maximizeButton->setRole(fullscreen ? QVCaptionRestore : QVCaptionMaximize);
-        m_maximizeButton->setToolTip(fullscreen
-            ? QString::fromUtf8("\xe5\x90\x91\xe4\xb8\x8b\xe8\xbf\x98\xe5\x8e\x9f(&R)")
-            : QString::fromUtf8("\xe6\x9c\x80\xe5\xa4\xa7\xe5\x8c\x96(&X)"));
+        m_buttonsVisible = visible;
+        m_minimizeButton->setVisible(visible);
+        m_maximizeButton->setVisible(visible);
+        m_closeButton->setVisible(visible);
+        if(m_fullscreenButton)
+            m_fullscreenButton->setVisible(!visible);
+        m_spacer->setSpacerSize(visible ? m_captionWidth * 3 : fullscreenWidth(), m_barHeight);
+        // make the menu bar recalculate the geometry of its corner widget
+        m_menuBar->setCornerWidget(m_spacer);
+        if(!visible) {
+            m_minimizeButton->setForcedHot(false);
+            m_maximizeButton->setForcedHot(false);
+            m_closeButton->setForcedHot(false);
+        }
+        raiseButtons();
+        reposition();
     }
 
-    // The close area in global coordinates, a little larger than the button itself.
+    void updateState()
+    {
+        // The caption buttons of the window are only used for the toolbar which is
+        // shown on top of the image in full screen display.
+        const bool wanted = m_mainWindow->isFullScreen() && m_menuBar->parentWidget() != m_mainWindow;
+
+        if(wanted != m_buttonsVisible)
+            setButtonsVisible(wanted);
+
+        if(m_maximizeButton) {
+            const bool fullscreen = m_mainWindow->isFullScreen();
+            m_maximizeButton->setRole(fullscreen ? QVCaptionRestore : QVCaptionMaximize);
+            const QString tip = fullscreen
+                ? QString::fromUtf8("\xe5\x90\x91\xe4\xb8\x8b\xe8\xbf\x98\xe5\x8e\x9f(&R)")
+                : QString::fromUtf8("\xe6\x9c\x80\xe5\xa4\xa7\xe5\x8c\x96(&X)");
+            if(m_maximizeButton->toolTip() != tip)
+                m_maximizeButton->setToolTip(tip);
+        }
+
+        if(m_buttonsVisible) {
+            updateHot();
+        }
+        reposition();
+    }
+
+    // The area of the close button, a little larger than the button itself, so
+    // that the last pixels of the screen still count as the button.
     QRect closeArea() const
     {
-        if(!m_closeButton || !m_closeButton->isVisible() || m_closeButton->width() <= 0)
+        if(!m_buttonsVisible || !m_closeButton || m_closeButton->width() <= 0)
             return QRect();
-        const QPoint topLeft = m_closeButton->mapToGlobal(QPoint(0, 0));
-        return QRect(topLeft, m_closeButton->size()).adjusted(-2, 0, 0, 0);
+        const QRect button(m_closeButton->mapToGlobal(QPoint(0, 0)), m_closeButton->size());
+        return button.adjusted(-4, -2, 4, 2).intersected(QRect(m_mainWindow->mapToGlobal(QPoint(0, 0)),
+                                                              m_mainWindow->size()));
     }
 
     bool inCloseArea(const QPoint& globalPos) const
@@ -332,8 +395,17 @@ private:
         return area.isValid() && area.contains(globalPos);
     }
 
+    void updateHot()
+    {
+        const QRect area = closeArea();
+        const bool hot = area.isValid() && area.contains(QCursor::pos());
+        m_closeButton->setForcedHot(hot);
+    }
+
     void raiseButtons()
     {
+        if(!m_buttonsVisible)
+            return;
         QWidget* buttons[] = { m_minimizeButton, m_maximizeButton, m_closeButton };
         for(QWidget* button : buttons) {
             if(button)
@@ -341,33 +413,55 @@ private:
         }
     }
 
+    void place(QWidget* widget, const QRect& rect)
+    {
+        if(widget && widget->geometry() != rect)
+            widget->setGeometry(rect);
+    }
+
     void reposition()
     {
-        if(!m_menuBar)
-            return;
-        const int width = m_menuBar->width();
-        const int height = m_menuBar->height();
-        if(width <= 0 || height <= 0)
+        if(!m_mainWindow)
             return;
 
-        int right = width;
-        QVCaptionButton* buttons[] = { m_closeButton, m_maximizeButton, m_minimizeButton };
-        for(QVCaptionButton* button : buttons) {
-            if(!button)
-                continue;
-            button->setGeometry(right - m_captionWidth, 0, m_captionWidth, height);
-            right -= m_captionWidth;
+        int barHeight = m_barHeight;
+        if(m_menuBar->height() > 0)
+            barHeight = m_menuBar->height();
+        if(barHeight <= 0)
+            return;
+
+        if(m_buttonsVisible) {
+            const int width = m_mainWindow->width();
+            if(width <= 0)
+                return;
+            int right = width;
+            QVCaptionButton* buttons[] = { m_closeButton, m_maximizeButton, m_minimizeButton };
+            for(QVCaptionButton* button : buttons) {
+                if(!button)
+                    continue;
+                place(button, QRect(right - m_captionWidth, 0, m_captionWidth, barHeight));
+                right -= m_captionWidth;
+            }
+        } else if(m_fullscreenButton) {
+            // the fullscreen button of the application stays in the corner of the menu bar
+            const int width = m_menuBar->width();
+            if(width <= 0)
+                return;
+            place(m_fullscreenButton, QRect(width - fullscreenWidth(), 0, fullscreenWidth(), barHeight));
         }
     }
 
     QMainWindow* m_mainWindow;
     QMenuBar* m_menuBar;
+    QWidget* m_fullscreenButton;
     QVCaptionButton* m_minimizeButton;
     QVCaptionButton* m_maximizeButton;
     QVCaptionButton* m_closeButton;
     QVMenuBarSpacer* m_spacer;
+    QTimer m_timer;
     int m_barHeight;
     int m_captionWidth;
+    bool m_buttonsVisible;
     bool m_cornerPress;
     bool m_restoreFullScreen;
 };
@@ -376,7 +470,8 @@ private:
  * @brief installCaptionButtons
  *
  * Replaces the fullscreen button of the menu bar by the three caption buttons of
- * Windows 11 (minimize, maximize/restore, close) in the top right corner.
+ * Windows 11 (minimize, maximize/restore, close) which are shown in the top right
+ * corner while the window is in full screen display.
  */
 inline void installCaptionButtons(QMainWindow* mainWindow)
 {
