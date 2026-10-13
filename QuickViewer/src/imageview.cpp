@@ -606,9 +606,18 @@ void ImageView::mouseMoveEvent(QMouseEvent *e)
         return;
     }
     if(e->pos().x() > width()- hover_border) {
-        if(m_hoverState != Qt::AnchorRight)
-            emit anchorHovered(Qt::AnchorRight);
-        m_hoverState = Qt::AnchorRight;
+        // The upper part of the right edge opens the toolbar of the top edge, so
+        // that the buttons in the top right corner of the window can be reached by
+        // pushing the mouse against the corner of the screen.
+        if(m_isFullScreen && e->pos().y() < qMax(hover_border, height() / 10)) {
+            if(m_hoverState != Qt::AnchorTop)
+                emit anchorHovered(Qt::AnchorTop);
+            m_hoverState = Qt::AnchorTop;
+        } else {
+            if(m_hoverState != Qt::AnchorRight)
+                emit anchorHovered(Qt::AnchorRight);
+            m_hoverState = Qt::AnchorRight;
+        }
         if(m_isFullScreen && qApp->HideMouseCursorInFullscreen())
             setCursor(Qt::BlankCursor);
         else

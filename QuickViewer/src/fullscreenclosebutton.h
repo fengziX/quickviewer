@@ -208,7 +208,6 @@ public:
         , m_barHeight(30)
         , m_captionWidth(49)
         , m_buttonsVisible(false)
-        , m_cornerPress(false)
         , m_restoreFullScreen(false)
     {
         m_timer.setInterval(40);
@@ -291,18 +290,14 @@ protected:
             }
             break;
         case QEvent::MouseButtonPress: {
+            // Directly close the window when the left button is pressed in the top
+            // right corner of a full screen window: the mouse can be thrown into the
+            // corner and clicked at once, without waiting for the toolbar to appear.
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            m_cornerPress = mouseEvent->button() == Qt::LeftButton && inCloseArea(mouseEvent->globalPosition().toPoint());
-            break;
-        }
-        case QEvent::MouseButtonRelease: {
-            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            const bool armed = m_cornerPress;
-            m_cornerPress = false;
-            // Safety net: handle a click in the corner of the screen even when the
-            // event was delivered to another widget.
-            if(armed && mouseEvent->button() == Qt::LeftButton && inCloseArea(mouseEvent->globalPosition().toPoint()))
+            if(mouseEvent->button() == Qt::LeftButton && inCloseArea(mouseEvent->globalPosition().toPoint())) {
                 m_mainWindow->close();
+                return true;
+            }
             break;
         }
         default:
@@ -372,21 +367,20 @@ private:
                 m_maximizeButton->setToolTip(tip);
         }
 
-        if(m_buttonsVisible) {
-            updateHot();
-        }
+        updateHot();
         reposition();
     }
 
-    // The area of the close button, a little larger than the button itself, so
-    // that the last pixels of the screen still count as the button.
+    // The area of the close button in global coordinates: the top right corner of
+    // the window. It is used while the window is in full screen display, also when
+    // the toolbar with the buttons is not shown yet.
     QRect closeArea() const
     {
-        if(!m_buttonsVisible || !m_closeButton || m_closeButton->width() <= 0)
+        if(!m_mainWindow || !m_mainWindow->isFullScreen())
             return QRect();
-        const QRect button(m_closeButton->mapToGlobal(QPoint(0, 0)), m_closeButton->size());
-        return button.adjusted(-4, -2, 4, 2).intersected(QRect(m_mainWindow->mapToGlobal(QPoint(0, 0)),
-                                                              m_mainWindow->size()));
+        const int height = qMax(m_barHeight, m_menuBar->height()) + 6;
+        const QRect local(m_mainWindow->width() - m_captionWidth, 0, m_captionWidth, height);
+        return QRect(m_mainWindow->mapToGlobal(local.topLeft()), local.size());
     }
 
     bool inCloseArea(const QPoint& globalPos) const
@@ -462,7 +456,6 @@ private:
     int m_barHeight;
     int m_captionWidth;
     bool m_buttonsVisible;
-    bool m_cornerPress;
     bool m_restoreFullScreen;
 };
 
