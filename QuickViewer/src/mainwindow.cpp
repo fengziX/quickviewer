@@ -347,24 +347,6 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
     if(this->focusWidget() != ui->graphicsView)
         return;
-    if(ui->graphicsView->isScrollMode() && !qApp->ScrollWithCursorWhenZooming()) {
-        if(seq.toString()=="Left") {
-            ui->graphicsView->horizontalScrollBar()->setValue(ui->graphicsView->horizontalScrollBar()->value()-300);
-            return;
-        }
-        if(seq.toString()=="Right") {
-            ui->graphicsView->horizontalScrollBar()->setValue(ui->graphicsView->horizontalScrollBar()->value()+300);
-            return;
-        }
-        if(seq.toString()=="Up") {
-            ui->graphicsView->verticalScrollBar()->setValue(ui->graphicsView->verticalScrollBar()->value()-300);
-            return;
-        }
-        if(seq.toString()=="Down") {
-            ui->graphicsView->verticalScrollBar()->setValue(ui->graphicsView->verticalScrollBar()->value()+300);
-            return;
-        }
-    }
 
     QAction* action = qApp->keyActions().getActionByKey(seq);
     if(action) {
@@ -640,14 +622,10 @@ void MainWindow::onGraphicsView_anchorHovered(Qt::AnchorPoint anchor)
 
 void MainWindow::onScrollModeChanged(bool scrolled)
 {
-    QStringList cusors = {"Left", "Right", "Up", "Down"};
-    // enable/disable cursor key shortcuts
-    foreach(const QString& c, cusors) {
-        auto key = QKeySequence(c);
-        QString name = qApp->keyActions().getNameByKey(key);
-        if(!name.isEmpty())
-            resetShortCut(name, c, scrolled);
-    }
+    // The cursor keys keep their shortcuts in every mode: an enlarged image is
+    // panned by dragging it with the left button, so the keys are always used to
+    // turn the pages.
+    Q_UNUSED(scrolled);
 }
 
 void MainWindow::resetShortCut(const QString name, const QString shortcuttext, bool removed)
