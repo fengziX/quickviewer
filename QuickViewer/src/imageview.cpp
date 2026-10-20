@@ -101,6 +101,12 @@ void ImageView::setPageManager(PageManager *manager)
     connect(manager, SIGNAL(readyForPaint()), this, SLOT(readyForPaint()));
     connect(manager, SIGNAL(volumeChanged(QString)), this, SLOT(on_volumeChanged_triggered(QString)));
     connect(manager, SIGNAL(pageAdded(ImageContent, bool)), this, SLOT(on_addImage_triggered(ImageContent, bool)));
+    // Every page is shown from its top left corner instead of keeping the scroll
+    // position of the page which was displayed before.
+    connect(manager, &PageManager::pageChanged, this, [this]() {
+        horizontalScrollBar()->setValue(horizontalScrollBar()->minimum());
+        verticalScrollBar()->setValue(verticalScrollBar()->minimum());
+    });
     connect(this, SIGNAL(slideShowStarted()), manager, SLOT(onSlideShowStarted()));
     connect(this, SIGNAL(slideShowStopped()), manager, SLOT(onSlideShowStopped()));
 }
@@ -177,8 +183,8 @@ void ImageView::on_clearImages_triggered()
     }
 
     m_pages.resize(0);
-    // horizontalScrollBar()->setValue(0);
-    // verticalScrollBar()->setValue(0);
+    horizontalScrollBar()->setValue(0);
+    verticalScrollBar()->setValue(0);
 }
 //static int paintCnt=0;
 void ImageView::readyForPaint() {
