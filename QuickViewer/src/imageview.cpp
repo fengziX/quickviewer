@@ -678,14 +678,12 @@ void ImageView::wheelEvent(QWheelEvent *event)
         readyForPaint();
         return;
     }
-    if(qApp->ScrollWithCursorWhenZooming()) {
-        QMouseValue mv(QKeySequence(qApp->keyboardModifiers()), event->buttons(), delta);
-        QAction* action = qApp->mouseActions().getActionByValue(mv);
-        if(action) {
-            action->trigger();
-            event->accept();
-            return;
-        }
+    // The mouse wheel triggers the action of the mouse configuration (turn a page,
+    // zoom) in both modes: also when the image is panned by dragging it with the
+    // left button instead of following the mouse cursor.
+    if(action) {
+        action->trigger();
+        event->accept();
         return;
     }
     QGraphicsView::wheelEvent(event);
