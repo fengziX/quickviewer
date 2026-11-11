@@ -275,6 +275,16 @@ MainWindow::~MainWindow()
 
 void MainWindow::resetShortcutKeys()
 {
+    // Ctrl+W closes the window. The bindings of the actions are saved in the
+    // settings file, where an action which never had a default key is stored as an
+    // empty sequence - such a stored value would hide the default, so the key is
+    // also added here when the configuration does not define any key for it.
+    QKeySequence closeKey(QStringLiteral("Ctrl+W"));
+    if(qApp->keyActions().keyMaps().contains("actionExit")
+        && qApp->keyActions().getKey("actionExit").isEmpty()
+        && qApp->keyActions().getNameByKey(closeKey).isEmpty())
+        qApp->keyActions().updateKey("actionExit", closeKey, true);
+
     QMap<QString, QAction*>& actions = qApp->keyActions().actions();
     QMap<QString, QKeySequence> & seqMap = qApp->keyActions().keyMaps();
     foreach(const QString& name, actions.keys()) {

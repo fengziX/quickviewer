@@ -143,6 +143,7 @@ void QVApplication::registDefaultKeyMap()
 {
     // Default key configs
     m_keyActions.addDefaultKey("actionExitApplicationOrFullscreen", QKeySequence("Esc"));
+    m_keyActions.addDefaultKey("actionExit", QKeySequence("Ctrl+W"));
     m_keyActions.addDefaultKey("actionNextPage", QKeySequence("L, Right, Space"));
     m_keyActions.addDefaultKey("actionPrevPage", QKeySequence("H, Left, Backspace"));
     m_keyActions.addDefaultKey("actionFastForward", QKeySequence("Shift+L, Num+3"));

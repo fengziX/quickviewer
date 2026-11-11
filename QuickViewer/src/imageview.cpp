@@ -599,7 +599,6 @@ void ImageView::mouseMoveEvent(QMouseEvent *e)
 {
     QGraphicsView::mouseMoveEvent(e);
 //    qDebug() << "qApp->HideMouseCursorInFullscreen()" << qApp->HideMouseCursorInFullscreen();
-    int NOT_HOVER_AREA = width() / 3;
     int hover_border = qApp->LargeToolbarIcons() ? 3 * HOVER_BORDER : HOVER_BORDER;
     if(e->pos().x() < hover_border && e->pos().y() < height()- hover_border) {
         if(m_hoverState != Qt::AnchorLeft)
@@ -619,6 +618,13 @@ void ImageView::mouseMoveEvent(QMouseEvent *e)
             if(m_hoverState != Qt::AnchorTop)
                 emit anchorHovered(Qt::AnchorTop);
             m_hoverState = Qt::AnchorTop;
+        } else if(m_isFullScreen && e->pos().y() > height() - hover_border) {
+            // The bottom right corner belongs to the bottom edge as well, so that
+            // the page bar appears wherever the mouse is pushed against the bottom
+            // of the screen.
+            if(m_hoverState != Qt::AnchorBottom)
+                emit anchorHovered(Qt::AnchorBottom);
+            m_hoverState = Qt::AnchorBottom;
         } else {
             if(m_hoverState != Qt::AnchorRight)
                 emit anchorHovered(Qt::AnchorRight);
@@ -651,7 +657,7 @@ void ImageView::mouseMoveEvent(QMouseEvent *e)
         m_hoverState = Qt::AnchorTop;
         return;
     }
-    if(e->pos().y() > height()- hover_border && e->pos().x() > NOT_HOVER_AREA) {
+    if(e->pos().y() > height()- hover_border) {
         if(m_hoverState != Qt::AnchorBottom)
            emit anchorHovered(Qt::AnchorBottom);
         m_hoverState = Qt::AnchorBottom;
